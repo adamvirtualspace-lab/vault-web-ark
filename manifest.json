@@ -1,0 +1,9 @@
+{
+  "id": "vault-web-ark",
+  "name": "Vault Web Ark",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Host and edit your Obsidian vault in a web browser.",
+  "author": "User",
+  "isDesktopOnly": true
+}

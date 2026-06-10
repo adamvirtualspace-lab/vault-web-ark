@@ -1,0 +1,27 @@
+{
+  "name": "vault-web-ark",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/preset-env": "^7.29.7",
+    "@babel/preset-typescript": "^7.29.7",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.0",
+    "obsidian": "^1.13.0",
+    "tslib": "^2.8.1",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@babel/cli": "^7.29.7",
+    "ws": "^8.21.0"
+  }
+}

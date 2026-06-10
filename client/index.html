@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vault Web Ark</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1e1e1e; color: #d4d4d4; height: 100vh; display: flex; flex-direction: column; }
+
+        #connect-panel { padding: 20px; background: #252526; border-bottom: 1px solid #333; display: flex; gap: 10px; align-items: center; }
+        #connect-panel input { background: #3c3c3c; border: 1px solid #555; color: #d4d4d4; padding: 8px 12px; border-radius: 4px; font-size: 14px; }
+        #connect-panel input:focus { outline: none; border-color: #0078d4; }
+        #connect-panel button { background: #0078d4; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        #connect-panel button:hover { background: #1a8ad4; }
+        #status { font-size: 13px; padding: 4px 12px; border-radius: 4px; }
+        #status.connected { background: #1b3a1b; color: #4ec94e; }
+        #status.disconnected { background: #3a1b1b; color: #e74c3c; }
+
+        #main { display: flex; flex: 1; overflow: hidden; }
+        #sidebar { width: 280px; background: #252526; border-right: 1px solid #333; overflow-y: auto; display: none; flex-direction: column; }
+        #sidebar.visible { display: flex; }
+
+        #search-box { width: 100%; padding: 8px 12px; background: #3c3c3c; border: none; color: #d4d4d4; font-size: 13px; border-bottom: 1px solid #333; }
+        #search-box:focus { outline: none; }
+
+        #file-list { padding: 8px; overflow-y: auto; flex: 1; }
+        .file-item { padding: 6px 12px; cursor: pointer; border-radius: 4px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+        .file-item:hover { background: #2a2d2e; }
+        .file-item.active { background: #37373d; color: #fff; }
+
+        #editor { flex: 1; display: none; flex-direction: column; }
+        #editor.visible { display: flex; }
+        #editor-header { padding: 12px 20px; background: #1e1e1e; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
+        #editor-header h3 { font-size: 14px; font-weight: 500; color: #ccc; }
+        #editor-header button { background: #0e639c; color: white; border: none; padding: 6px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+        #editor-header button:hover { background: #1177bb; }
+        #editor-header button:disabled { opacity: 0.5; cursor: default; }
+
+        #editor-content { flex: 1; display: flex; }
+        #editor-content textarea { width: 100%; height: 100%; background: #1e1e1e; border: none; color: #d4d4d4; padding: 20px; font-family: 'Consolas', 'Courier New', monospace; font-size: 14px; line-height: 1.6; resize: none; }
+        #editor-content textarea:focus { outline: none; }
+
+        #preview { width: 100%; height: 100%; padding: 20px; overflow-y: auto; display: none; line-height: 1.6; }
+        #preview.visible { display: block; }
+        #preview h1, #preview h2, #preview h3 { color: #569cd6; margin: 16px 0 8px; }
+        #preview p { margin: 8px 0; }
+        #preview code { background: #2d2d2d; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+        #preview pre { background: #2d2d2d; padding: 16px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
+        #preview ul, #preview ol { padding-left: 24px; margin: 8px 0; }
+        #preview a { color: #3794ff; }
+
+        .loading { padding: 20px; text-align: center; color: #888; }
+        .dir-header { padding: 8px 12px 4px; font-size: 11px; text-transform: uppercase; color: #888; letter-spacing: 1px; }
+    </style>
+</head>
+<body>
+    <div id="connect-panel">
+        <input type="text" id="url" value="ws://localhost:8080" placeholder="ws://host:port">
+        <input type="text" id="token" placeholder="Access Token" value="change-me">
+        <button id="connectBtn">Connect</button>
+        <span id="status" class="disconnected">Disconnected</span>
+    </div>
+
+    <div id="main">
+        <div id="sidebar">
+            <input type="text" id="search-box" placeholder="Search files..." oninput="filterFiles()">
+            <div id="file-list"></div>
+        </div>
+
+        <div id="editor">
+            <div id="editor-header">
+                <h3 id="file-path"></h3>
+                <div style="display:flex;gap:8px">
+                    <button id="previewBtn" onclick="togglePreview()">Preview</button>
+                    <button id="saveBtn" onclick="saveFile()" disabled>Save</button>
+                </div>
+            </div>
+            <div id="editor-content">
+                <textarea id="file-content" oninput="onEdit()"></textarea>
+                <div id="preview"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket = null;
+        let currentFile = null;
+        let allFiles = [];
+        let fileContents = {};
+        let modified = false;
+        let previewMode = false;
+
+        const statusEl = document.getElementById('status');
+        const sidebar = document.getElementById('sidebar');
+        const editor = document.getElementById('editor');
+        const fileList = document.getElementById('file-list');
+        const filePath = document.getElementById('file-path');
+        const fileContent = document.getElementById('file-content');
+        const preview = document.getElementById('preview');
+        const saveBtn = document.getElementById('saveBtn');
+
+        function setStatus(text, connected) {
+            statusEl.textContent = text;
+            statusEl.className = connected ? 'connected' : 'disconnected';
+        }
+
+        document.getElementById('connectBtn').onclick = () => {
+            if (socket) { socket.close(); socket = null; }
+            const url = document.getElementById('url').value;
+            const token = document.getElementById('token').value;
+            const fullUrl = token ? url + '?token=' + encodeURIComponent(token) : url;
+            setStatus('Connecting...', false);
+            socket = new WebSocket(fullUrl);
+
+            socket.onopen = () => {
+                setStatus('Connected', true);
+                sidebar.classList.add('visible');
+            };
+
+            socket.onmessage = (event) => {
+                handleServerMessage(JSON.parse(event.data));
+            };
+
+            socket.onclose = () => {
+                setStatus('Disconnected', false);
+                sidebar.classList.remove('visible');
+                editor.classList.remove('visible');
+                socket = null;
+            };
+        };
+
+        function handleServerMessage(data) {
+            switch (data.type) {
+                case 'ready':
+                    requestFileList();
+                    break;
+                case 'file-list':
+                    allFiles = data.payload.filter(f => f.extension === 'md');
+                    renderFileList(allFiles);
+                    break;
+                case 'file-content':
+                    fileContents[data.path] = data.payload;
+                    if (data.path === currentFile) displayFile(data.path, data.payload);
+                    break;
+                case 'file-saved':
+                    modified = false;
+                    saveBtn.disabled = true;
+                    break;
+            }
+        }
+
+        function requestFileList() { sendMessage({ type: 'list-files' }); }
+
+        function sendMessage(data) { if (socket) socket.send(JSON.stringify(data)); }
+
+        function renderFileList(files) {
+            fileList.innerHTML = '';
+            files.forEach(f => {
+                const div = document.createElement('div');
+                div.className = 'file-item' + (f.path === currentFile ? ' active' : '');
+                div.innerHTML = '<span class="file-name">' + escapeHtml(f.path) + '</span>';
+                div.onclick = () => openFile(f.path);
+                fileList.appendChild(div);
+            });
+        }
+
+        function filterFiles() {
+            const q = document.getElementById('search-box').value.toLowerCase();
+            renderFileList(allFiles.filter(f => f.path.toLowerCase().includes(q)));
+        }
+
+        function openFile(path) {
+            currentFile = path;
+            modified = false;
+            saveBtn.disabled = true;
+            editor.classList.add('visible');
+            filePath.textContent = path;
+            document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
+            fileList.querySelectorAll('.file-item').forEach(el => {
+                if (el.textContent.trim() === path) el.classList.add('active');
+            });
+            if (fileContents[path]) {
+                displayFile(path, fileContents[path]);
+            } else {
+                fileContent.value = 'Loading...';
+                sendMessage({ type: 'read-file', path });
+            }
+        }
+
+        function displayFile(path, content) {
+            fileContent.value = content;
+            if (previewMode) renderPreview(content);
+        }
+
+        function onEdit() {
+            if (!currentFile) return;
+            modified = true;
+            saveBtn.disabled = false;
+        }
+
+        function saveFile() {
+            if (!currentFile || !modified) return;
+            sendMessage({ type: 'write-file', path: currentFile, payload: fileContent.value });
+        }
+
+        function togglePreview() {
+            previewMode = !previewMode;
+            document.getElementById('previewBtn').textContent = previewMode ? 'Edit' : 'Preview';
+            if (previewMode) {
+                fileContent.style.display = 'none';
+                preview.classList.add('visible');
+                renderPreview(fileContent.value);
+            } else {
+                fileContent.style.display = 'block';
+                preview.classList.remove('visible');
+            }
+        }
+
+        function renderPreview(md) {
+            preview.innerHTML = simpleMarkdown(md || '');
+        }
+
+        function simpleMarkdown(md) {
+            let html = md
+                .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+                .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+                .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/_(.+?)_/g, '<em>$1</em>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+                .replace(/^- (.+)$/gm, '<li>$1</li>')
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/\n/g, '<br>');
+            return '<p>' + html + '</p>';
+        }
+
+        function escapeHtml(text) {
+            const d = document.createElement('div');
+            d.textContent = text;
+            return d.innerHTML;
+        }
+    </script>
+</body>
+</html>
