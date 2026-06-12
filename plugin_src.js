@@ -121,12 +121,12 @@ const CLIENT_HTML = [
 'function filterFiles(){var q=document.getElementById("search-box").value.toLowerCase();renderFileList(q?allFiles.filter(function(f){return f.path.toLowerCase().indexOf(q)!==-1}):allFiles)}',
 'function openFile(path){currentFile=path;modified=false;saveBtnEl.disabled=true;editorEl.classList.add("visible");filePathEl.textContent=path;if(fileContents[path])displayFile(path,fileContents[path]);else{contentEl.value="Loading...";send({type:"read-file",path:path})}}',
 'function displayFile(pn,cv){contentEl.value=cv;if(previewMode)renderPreview(cv)}',
-'function showImage(path){var url=origin+"/vault/"+path;logMsg("Image: "+url);lightboxImg.src=url;document.getElementById("lightbox-info").textContent=path;lightboxEl.classList.add("visible")}',
+ 'function showImage(path){var url=origin+"/vault/"+encodeURIComponent(path);logMsg("Image: "+url);lightboxImg.src=url;document.getElementById("lightbox-info").textContent=path;lightboxEl.classList.add("visible")}',
 'function closeLightbox(e){if(e.target===e.currentTarget||e.target.classList.contains("lb-close")){lightboxEl.classList.remove("visible");lightboxImg.src=""}}',
 'previewEl.onclick=function(e){if(e.target.tagName==="IMG"&&e.target.src.indexOf("/vault/")>=0){showImage(decodeURIComponent(e.target.src.split("/vault/")[1]))}}',
 'function onEdit(){if(!currentFile)return;modified=true;saveBtnEl.disabled=false}',
 'function saveFile(){if(!currentFile||!modified)return;send({type:"write-file",path:currentFile,payload:contentEl.value})}',
-'function togglePreview(){previewMode=!previewMode;document.getElementById("previewBtn").textContent=previewMode?"Edit":"Preview";if(previewMode){contentEl.style.display="none";previewEl.classList.add("visible");renderPreview(contentEl.value)}else{contentEl.style.display="block";previewEl.classList.remove("visible")}}',
+'function togglePreview(){previewMode=!previewMode;document.getElementById("previewBtn").textContent=previewMode?"Edit":"Preview";if(previewMode){contentEl.style.display="none";previewEl.classList.add("visible");renderPreview(contentEl.value);fixImageUrls(previewEl);}else{contentEl.style.display="block";previewEl.classList.remove("visible")}}',
 'function newNote(){var name=prompt("New note name:");if(!name)return;if(!name.endsWith(".md"))name+=".md";send({type:"create-file",path:name})}',
 'function deleteFile(){if(!currentFile)return;if(!confirm("Delete this note?"))return;var p=currentFile;currentFile=null;editorEl.classList.remove("visible");send({type:"delete-file",path:p})}',
 'function renameFile(){if(!currentFile)return;var parts=currentFile.split("/");var oldName=parts.pop();var newName=prompt("New name:",oldName);if(!newName||newName===oldName)return;var newPath=parts.length?parts.join("/")+"/"+newName:newName;send({type:"rename-file",path:currentFile,newPath:newPath})}',
@@ -143,12 +143,13 @@ const CLIENT_HTML = [
 'h=h.replace(/\\*\\*(.+?)\\*\\*/g,"<strong>"+esc("$1")+"</strong>");',
 'h=h.replace(/_(.+?)_/g,"<em>"+esc("$1")+"</em>");',
 'h=h.replace(/^- (.+)$/gm,"<li>"+esc("$1")+"</li>");',
-'h=h.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,function(m,t,u){if(u.match(/\\.(png|jpg|jpeg|gif|svg|webp)$/i)){var ip=u;if(ip.indexOf("://")===-1){if(ip.indexOf("/")===0)ip=ip.substring(1);var dir=currentFile?currentFile.substring(0,currentFile.lastIndexOf("/")+1):"";ip=dir+ip;ip="http://localhost:8080/vault/"+ip}return"<img src=\\""+ip+"\\" alt=\\""+esc(t)+"\\">"}return"<a href=\\""+u+"\\">"+t+"</a>"});',
+'h=h.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g,function(m,t,u){if(u.match(/\\.(png|jpg|jpeg|gif|svg|webp)$/i)){var ip=u;if(ip.indexOf("://")===-1){if(ip.indexOf("/")===0)ip=ip.substring(1);var dir=currentFile?currentFile.substring(0,currentFile.lastIndexOf("/")+1):"";ip=dir+ip;ip=origin+"/vault/"+encodeURIComponent(ip).replace(/%2F/g, "/");}return"<img src=\\""+ip+"\\" alt=\\""+esc(t)+"\\">"}return"<a href=\\""+u+"\\">"+t+"</a>"});',
 'h=h.replace(/\\n\\n/g,"</p><p>");',
 'h=h.replace(/\\n/g,"<br>");',
 'return"<p>"+h+"</p>"}',
 '</script></body></html>'
-].join('\n');
+, '<script>function correctImageUris(){if(!previewEl)return;previewEl.querySelectorAll("img").forEach(img=>{let src=img.getAttribute('src');if(/^https?:\/\//.test(src))return;const dir=currentFile?currentFile.substring(0,currentFile.lastIndexOf('/')+1):'';const path=dir+src.replace(/^\/+/, '');img.setAttribute('src',origin+'/vault/'+encodeURIComponent(path));});}
+function patchImages(){correctImageUris();}patchImages(); window.addEventListener("load",correctImageUris);</script>'
 
 module.exports = class VaultWebArkPlugin extends Plugin {
     settings = Object.assign({}, DEFAULT_SETTINGS);
@@ -203,8 +204,9 @@ module.exports = class VaultWebArkPlugin extends Plugin {
                         vault.readBinary(file).then(data => {
                             const ext = path.extname(filePath).toLowerCase();
                             const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-                            res.writeHead(200, { 'Content-Type': contentType });
-                            res.end(data);
+res.setHeader('Access-Control-Allow-Origin', '*');
+                        res.writeHead(200, { 'Content-Type': contentType });
+                        res.end(data);
                         }).catch(() => {
                             res.writeHead(404);
                             res.end('Not found');
